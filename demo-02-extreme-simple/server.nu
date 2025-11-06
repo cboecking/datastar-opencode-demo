@@ -1,0 +1,1 @@
+{|req| open index.html }

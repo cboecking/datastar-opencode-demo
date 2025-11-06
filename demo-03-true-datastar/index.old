@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Datastar + OpenCode</title>
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.6/bundles/datastar.js"></script>
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        input {
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        button {
+            padding: 0.5rem 1rem;
+        }
+        .response {
+            background: #f0f0f0;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            min-height: 3rem;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body data-signals='{"sessionId": "", "prompt": "", "response": "", "loading": false}'>
+    <h1>Datastar + OpenCode</h1>
+
+    <div data-show="!$sessionId">
+        <button onclick="createSession()">Create Session</button>
+    </div>
+
+    <div data-show="$sessionId">
+        <p>Session: <code data-text="$sessionId"></code></p>
+
+        <form onsubmit="event.preventDefault();sendPrompt();return false;">
+            <input
+                id="promptInput"
+                data-bind="prompt"
+                placeholder="Enter your prompt..."
+                required>
+            <button
+                type="submit"
+                data-attr:disabled="$loading">
+                <span data-show="!$loading">Send</span>
+                <span data-show="$loading">Sending...</span>
+            </button>
+        </form>
+
+        <h2>Response</h2>
+        <div class="response" data-text="$response || 'No response yet...'"></div>
+    </div>
+
+    <script>
+        console.log('Script loading...');
+        const API = 'http://localhost:3030';
+        const textParts = new Map();
+        let datastoreReady = false;
+        console.log('Variables initialized');
+
+        // Helper to get signals from Datastar
+        function getSignals() {
+            const body = document.querySelector('body');
+            return JSON.parse(body.dataset.signals || '{}');
+        }
+
+        // Helper to update signals in Datastar
+        function updateSignals(updates) {
+            const body = document.querySelector('body');
+            const signals = getSignals();
+            Object.assign(signals, updates);
+            body.dataset.signals = JSON.stringify(signals);
+            // Trigger Datastar reactivity by dispatching event
+            body.dispatchEvent(new CustomEvent('datastar-signals-changed'));
+        }
+
+        // Initialize EventSource on load
+        console.log('Connecting to OpenCode event stream...');
+        const eventSource = new EventSource(`${API}/event`);
+
+        eventSource.onopen = () => {
+            console.log('SSE connected');
+        };
+
+        eventSource.onerror = (err) => {
+            console.error('SSE error:', err);
+        };
+
+        eventSource.onmessage = (e) => {
+            const event = JSON.parse(e.data);
+
+            if (event.type === 'message.part.updated' && event.properties.part.type === 'text') {
+                const part = event.properties.part;
+                textParts.set(part.id, part.text);
+
+                const allText = Array.from(textParts.values()).join('\n\n');
+                updateSignals({ response: allText, loading: false });
+            }
+        };
+
+        // Create session - make global
+        window.createSession = async function() {
+            console.log('createSession called!');
+            try {
+                const res = await fetch(`${API}/session`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const session = await res.json();
+                console.log('Session created:', session.id);
+
+                updateSignals({ sessionId: session.id });
+            } catch (err) {
+                console.error('Error:', err);
+                alert(`Error: ${err.message}`);
+            }
+        };
+
+        // Send prompt - make global
+        window.sendPrompt = async function() {
+            console.log('sendPrompt called!');
+            const signals = getSignals();
+            const { sessionId } = signals;
+
+            // Read prompt directly from input element
+            const promptInput = document.getElementById('promptInput');
+            const prompt = promptInput.value;
+            console.log('sessionId:', sessionId, 'prompt:', prompt);
+
+            if (!sessionId || !prompt.trim()) {
+                console.log('Validation failed - sessionId or prompt empty');
+                return;
+            }
+
+            updateSignals({ loading: true, response: 'Thinking...' });
+            textParts.clear();
+
+            try {
+                await fetch(`${API}/session/${sessionId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        parts: [{ type: 'text', text: prompt }]
+                    })
+                });
+
+                // Clear the input
+                promptInput.value = '';
+                updateSignals({ prompt: '' });
+            } catch (err) {
+                updateSignals({ response: `Error: ${err.message}`, loading: false });
+            }
+        };
+    </script>
+</body>
+</html>

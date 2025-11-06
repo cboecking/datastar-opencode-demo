@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Datastar + OpenCode Demo</title>
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.6/bundles/datastar.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            line-height: 1.6;
+        }
+        .event {
+            background: #f5f5f5;
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .status {
+            padding: 1rem;
+            background: #e3f2fd;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        h1 { color: #333; }
+        button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 0.5rem;
+        }
+        button:hover { background: #1976d2; }
+        .connected { color: #4caf50; }
+        .disconnected { color: #f44336; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Datastar + OpenCode Demo</h1>
+
+    <div class="status">
+        <strong>Connection Status:</strong>
+        <span data-bind="connectionStatus"></span>
+    </div>
+
+    <div>
+        <h2>Session Management</h2>
+        <div>
+            <button id="createSession">Create Session</button>
+            <button id="sendMessage" disabled>Send Test Message</button>
+        </div>
+        <p><strong>Session ID:</strong> <code id="sessionId" style="background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">None</code></p>
+    </div>
+
+    <div style="margin-top: 2rem;">
+        <h2>Send Prompt</h2>
+        <textarea id="promptInput" rows="3" style="width: 100%; font-family: monospace;" placeholder="Enter your prompt here..."></textarea>
+        <br>
+        <button id="sendPrompt" disabled>Send Prompt</button>
+    </div>
+
+    <div style="margin-top: 2rem;">
+        <h2>OpenCode Events</h2>
+        <p>Events from <code>GET /event</code> stream:</p>
+        <div id="events"></div>
+    </div>
+
+    <script>
+        // OpenCode API Configuration
+        const OPENCODE_URL = 'http://localhost:3030';
+        let currentSessionId = null;
+
+        // DOM elements
+        const createSessionBtn = document.getElementById('createSession');
+        const sendMessageBtn = document.getElementById('sendMessage');
+        const sendPromptBtn = document.getElementById('sendPrompt');
+        const sessionIdSpan = document.getElementById('sessionId');
+        const promptInput = document.getElementById('promptInput');
+        const eventsDiv = document.getElementById('events');
+        const statusSpan = document.querySelector('[data-bind="connectionStatus"]');
+
+        // Create a new session
+        async function createSession() {
+            try {
+                const response = await fetch(`${OPENCODE_URL}/session`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'Datastar Demo Session' })
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const session = await response.json();
+                currentSessionId = session.id;
+                sessionIdSpan.textContent = session.id;
+
+                // Enable buttons
+                sendMessageBtn.disabled = false;
+                sendPromptBtn.disabled = false;
+
+                addEvent({ type: 'session.created', session });
+            } catch (err) {
+                console.error('Error creating session:', err);
+                alert('Failed to create session: ' + err.message);
+            }
+        }
+
+        // Send a test message
+        async function sendTestMessage() {
+            if (!currentSessionId) return;
+
+            try {
+                const response = await fetch(`${OPENCODE_URL}/session/${currentSessionId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        parts: [{
+                            type: 'text',
+                            text: 'Hello from Datastar! What is 2+2?'
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API Error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const message = await response.json();
+                addEvent({ type: 'message.sent', message });
+            } catch (err) {
+                console.error('Error sending message:', err);
+                alert('Failed to send message: ' + err.message);
+            }
+        }
+
+        // Send custom prompt
+        async function sendPrompt() {
+            if (!currentSessionId) return;
+
+            const text = promptInput.value.trim();
+            if (!text) {
+                alert('Please enter a prompt');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${OPENCODE_URL}/session/${currentSessionId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        parts: [{
+                            type: 'text',
+                            text: text
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API Error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const message = await response.json();
+                addEvent({ type: 'prompt.sent', message });
+                promptInput.value = ''; // Clear input
+            } catch (err) {
+                console.error('Error sending prompt:', err);
+                alert('Failed to send prompt: ' + err.message);
+            }
+        }
+
+        // Display event in UI
+        function addEvent(data) {
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event';
+            eventDiv.textContent = JSON.stringify(data, null, 2);
+            eventsDiv.insertBefore(eventDiv, eventsDiv.firstChild);
+
+            // Keep only last 20 events
+            while (eventsDiv.children.length > 20) {
+                eventsDiv.removeChild(eventsDiv.lastChild);
+            }
+        }
+
+        // Connect to OpenCode SSE stream
+        function connectToOpenCode() {
+            const eventSource = new EventSource(`${OPENCODE_URL}/event`);
+
+            eventSource.onopen = () => {
+                statusSpan.textContent = '✅ Connected to OpenCode';
+                statusSpan.className = 'connected';
+            };
+
+            eventSource.onerror = (error) => {
+                statusSpan.textContent = '❌ Disconnected from OpenCode';
+                statusSpan.className = 'disconnected';
+                console.error('SSE Error:', error);
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('OpenCode Event:', data);
+                    addEvent(data);
+                } catch (err) {
+                    console.error('Error parsing event:', err);
+                }
+            };
+        }
+
+        // Event listeners
+        createSessionBtn.addEventListener('click', createSession);
+        sendMessageBtn.addEventListener('click', sendTestMessage);
+        sendPromptBtn.addEventListener('click', sendPrompt);
+
+        // Start connection on page load
+        connectToOpenCode();
+    </script>
+</body>
+</html>

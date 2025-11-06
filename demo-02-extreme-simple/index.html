@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenCode Minimal</title>
+    <style>
+        body { font-family: monospace; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        input { width: 100%; padding: 0.5rem; font-size: 1rem; }
+        button { padding: 0.5rem 1rem; margin-top: 0.5rem; }
+        .event { background: #f0f0f0; padding: 0.5rem; margin: 0.5rem 0; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <h1>OpenCode Minimal</h1>
+    <p>Session: <code id="session">Loading...</code></p>
+
+    <form id="form">
+        <input id="prompt" placeholder="Enter your prompt..." required>
+        <button type="submit">Send</button>
+    </form>
+
+    <h2>Events</h2>
+    <div id="events"></div>
+
+    <script>
+        const API = 'http://localhost:3030';
+        let sessionId;
+        const textParts = new Map(); // Track text parts by ID
+
+        // Auto-create session on load
+        fetch(`${API}/session`, { method: 'POST' })
+            .then(r => r.json())
+            .then(s => {
+                sessionId = s.id;
+                document.getElementById('session').textContent = s.id;
+            });
+
+        // Handle form submit
+        document.getElementById('form').onsubmit = async (e) => {
+            e.preventDefault();
+            const text = document.getElementById('prompt').value;
+
+            await fetch(`${API}/session/${sessionId}/message`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parts: [{ type: 'text', text }] })
+            });
+
+            document.getElementById('prompt').value = '';
+        };
+
+        // Event stream - only show AI text responses
+        new EventSource(`${API}/event`).onmessage = (e) => {
+            const event = JSON.parse(e.data);
+
+            // Only show text responses from AI
+            if (event.type === 'message.part.updated' && event.properties.part.type === 'text') {
+                const part = event.properties.part;
+                const key = part.id;
+
+                // Update or create text part display
+                let div = textParts.get(key);
+                if (!div) {
+                    div = document.createElement('div');
+                    div.className = 'event';
+                    document.getElementById('events').prepend(div);
+                    textParts.set(key, div);
+                }
+                div.textContent = part.text;
+            }
+        };
+    </script>
+</body>
+</html>
