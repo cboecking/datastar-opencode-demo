@@ -70,7 +70,7 @@ Learning Datastar's natural patterns and integrating with OpenCode AI.
 Browser (Datastar)
     ↓ @post('/create-session')
 http-nu (Nushell)
-    ↓ curl POST
+    ↓ http post
 OpenCode API
     ↓ {"id": "ses_..."}
 http-nu
@@ -93,7 +93,7 @@ OpenCode provides SSE at `/event` but:
 **Use `filter` instead of `where`:**
 
 ```nushell
-curl -N $"($OPENCODE_API)/event"
+http get $"($OPENCODE_API)/event"
 | lines
 | filter {|line| $line | str starts-with "data:"}  # ✅ Streams in real-time!
 | each {|line| $line | str substring 6.. | from json}
@@ -224,28 +224,24 @@ Also see reference to 'delta' above.
 - `message.part.updated` with `type: "reasoning"` - Internal reasoning
 - `message.part.updated` with `type: "step-start"` - Tool invocation
 
-### The http-nu Problem
+### http-nu Streaming
 
-**Works in terminal:**
-```nu
-http get http://localhost:3030/event | lines  # ✅ Streams!
-```
+**As of http-nu 0.5.1**, the TLS crypto provider issue has been fixed. You can now use nushell's `http get` command directly in http-nu closures:
 
-**Fails in http-nu:**
 ```nu
 {|req|
-    http get http://localhost:3030/event | lines  # ❌ TLS crypto provider error
+    http get http://localhost:3030/event | lines  # ✅ Works!
 }
 ```
 
-**Workaround - Use curl with filter:**
+**For streaming with filtering:**
 ```nu
-curl -N -s http://localhost:3030/event
+http get http://localhost:3030/event
 | lines
 | filter {|line| $line | str starts-with "data:"}  # ✅ Streams in real-time!
 ```
 
-**The issue:** nushell's `http` command requires TLS crypto provider in http-nu closure context. Using `curl` avoids the TLS error. Using `filter` (instead of `where`) enables real-time streaming without buffering.
+**Note:** Use `filter` (instead of `where`) to enable real-time streaming without buffering.
 
 ## Comparison: xs TodoMVC Tutorial
 
