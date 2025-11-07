@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Learning Datastar</title>
+    <title>Datastar + OpenCode</title>
     <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.6/bundles/datastar.js"></script>
     <style>
         body {
@@ -14,34 +14,59 @@
             padding: 0.5rem 1rem;
             margin: 0.5rem;
         }
+        input[type="text"] {
+            padding: 0.5rem;
+            font-size: 1rem;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+        .response-box {
+            background: #f0f0f0;
+            padding: 1rem;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            min-height: 3rem;
+        }
     </style>
 </head>
-<body data-signals='{"sessionId": "", "prompt": "", "response": "", "loading": false}'>
+<body data-signals='{"count": 0, "sessionId": "", "response": ""}'>
     <h1>Datastar + OpenCode</h1>
+    <pre>
+   .-~-.
+  (     )
+   '-~-'
+    </pre>
 
-    <div data-show="!$sessionId">
+    <div>
+        <p>Count: <span data-text="$count"></span></p>
+        <button data-on:click="$count < 5 ? $count += 1 : null" data-attr:disabled="$count >= 5">Increment</button>
+        <button data-on:click="$count = 0">Reset</button>
+    </div>
+
+    <!-- Main app container - server will patch this with HTML fragments -->
+    <div id="app">
         <button data-on:click="@post('/create-session')">Create Session</button>
     </div>
 
-    <div data-show="$sessionId">
-        <p>Session: <code data-text="$sessionId"></code></p>
-
-        <input
-            type="text"
-            data-bind="prompt"
-            placeholder="Enter your prompt..."
-            style="padding: 0.5rem; font-size: 1rem; width: 100%; margin-bottom: 0.5rem;">
-
-        <button
-            data-on:click="@post('/send-prompt')"
-            data-attr:disabled="$loading">
-            <span data-show="!$loading">Send</span>
-            <span data-show="$loading">Sending...</span>
-        </button>
-
-        <h2>Response</h2>
-        <div style="background: #f0f0f0; padding: 1rem; border-radius: 4px; white-space: pre-wrap; min-height: 3rem;"
-             data-text="$response || 'No response yet...'"></div>
-    </div>
+    <script>
+        let accumulatedResponse = '';
+        const eventSource = new EventSource('http://localhost:3030/event');
+        eventSource.onmessage = (e) => {
+            const event = JSON.parse(e.data);
+            if (event.type === 'message.part.updated' && event.properties.part.type === 'text' && event.properties.part.sessionID === getSessionId()) {
+                accumulatedResponse += event.properties.part.text;
+                updateSignal('response', accumulatedResponse);
+            }
+        };
+        function getSessionId() {
+            const signals = JSON.parse(document.body.dataset.signals || '{}');
+            return signals.sessionId || '';
+        }
+        function updateSignal(key, value) {
+            const signals = JSON.parse(document.body.dataset.signals || '{}');
+            signals[key] = value;
+            document.body.dataset.signals = JSON.stringify(signals);
+        }
+    </script>
 </body>
 </html>

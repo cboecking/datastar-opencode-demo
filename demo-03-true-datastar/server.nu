@@ -8,52 +8,43 @@
     if ($req.path == "/") {
         open index.html
     } else if ($req.path == "/create-session") {
-        # Call OpenCode to create session (using curl since nushell http needs TLS provider)
+        # Call OpenCode to create session
         let session = (curl -s -X POST $"($OPENCODE_API)/session" | from json)
 
-        # Return session ID as Datastar signal
+        # Generate HTML fragment with session UI (single line for SSE)
+        let html = $"<div><p>Session: <code>($session.id)</code></p><form data-on:submit=\"@post\('/send-prompt', \{contentType: 'form'\}\)\"><input type=\"hidden\" name=\"sessionId\" value=\"($session.id)\"><input type=\"text\" name=\"prompt\" placeholder=\"Enter your prompt...\" required><button type=\"submit\">Send</button></form><h2>Response</h2><div data-text=\"\$response\" class=\"response-box\"></div></div>"
+
+        # Return HTML fragment as Datastar element patch
         .response {headers: {"content-type": "text/event-stream"}}
-        $"event: datastar-patch-signals
-data: signals {\"sessionId\": \"($session.id)\"}
+        $"event: datastar-patch-elements
+data: selector #app
+data: mode inner
+data: elements ($html)
+
+event: datastar-patch-signals
+data: signals {\"sessionId\": \"($session.id)\", \"response\": \"\"}
 
 "
     } else if ($req.path == "/send-prompt") {
-        # Get signals from Datastar (using captured body)
-        let signals = ($body | from json)
-        let session_id = ($signals | get sessionId)
-        let prompt = ($signals | get prompt)
+        # Parse form data from Datastar form submission (URL-encoded)
+        # Format: sessionId=ses_xxx&prompt=hello+world
+        let form_data = ($body
+            | split row '&'
+            | each { |pair| $pair | split row '=' }
+            | reduce -f {} { |pair, acc| $acc | insert ($pair.0) ($pair.1 | url decode) }
+        )
+        let session_id = ($form_data | get sessionId)
+        let prompt = ($form_data | get prompt)
 
-        # Send message to OpenCode (using curl since nushell http needs TLS provider)
+        # Send message to OpenCode (using curl - nushell http has TLS crypto provider issue in http-nu)
         let request_body = ({parts: [{type: "text", text: $prompt}]} | to json)
         curl -s -X POST $"($OPENCODE_API)/session/($session_id)/message" -H "Content-Type: application/json" -d $request_body | ignore
 
-        # Stream OpenCode SSE events and transform to Datastar format
+        # Stream OpenCode events and transform to Datastar HTML fragments
         .response {headers: {"content-type": "text/event-stream"}}
 
-        # Stream OpenCode events, filtering for this session only
-        # Manual SSE formatting since to sse needs records not lists
+        # Simplest test - just pass through raw curl output (no lines parsing)
         curl -N -s $"($OPENCODE_API)/event"
-        | lines
-        | each { |line|
-            if ($line | str starts-with "data: ") {
-                let json_str = ($line | str substring 6..)
-                try {
-                    let event = ($json_str | from json)
-                    # Filter: only message.part.updated events for our session with text
-                    if ($event.type == "message.part.updated" and
-                        $event.properties?.part?.type == "text" and
-                        $event.properties?.part?.sessionId == $session_id) {
-                        let text = $event.properties.part.text
-                        # Use to json for proper escaping
-                        let signal_update = ({response: $text, loading: false} | to json)
-                        # Manually format SSE
-                        $"event: datastar-patch-signals\ndata: signals ($signal_update)\n\n"
-                    }
-                } catch { null }
-            }
-        }
-        | compact
-        | str join
     } else {
         .response {status: 404}
         "Not found"

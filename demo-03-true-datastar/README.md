@@ -41,8 +41,9 @@ Learning Datastar's natural patterns and integrating with OpenCode AI.
    "body content"
    ```
 
-2. **SSE formatting** - Use `to sse` for records
+2. **SSE formatting** - Use `to sse` (http-nu command) for records
    ```nushell
+   # to sse is provided by http-nu, not standard nushell
    {event: "datastar-patch-signals", data: "signals {...}"} | to sse
    ```
 
@@ -85,127 +86,240 @@ OpenCode provides SSE at `/event` but:
 
 1. **Broadcasts ALL sessions** - Not filtered by session ID
 2. **Never closes** - Stream runs forever
-3. **Nushell buffering** - `| lines` waits for stream to close before processing
+3. **Nushell `where` buffering** - Using `where` in pipelines causes buffering (must use `filter` instead)
 
-### Attempted Solutions
+### Solution
 
-**Approach 1: Direct transformation**
+**Use `filter` instead of `where`:**
+
 ```nushell
 curl -N $"($OPENCODE_API)/event"
 | lines
-| each { |line| ... } # Buffers until stream closes!
+| filter {|line| $line | str starts-with "data:"}  # ✅ Streams in real-time!
+| each {|line| $line | str substring 6.. | from json}
+| filter {|event| $event.type? == "message.part.updated"}
 ```
-❌ Blocked by nushell pipeline buffering
 
-**Approach 2: Timeout**
-```nushell
-curl --max-time 10 ...
-```
-❌ Either times out early or waits full duration
-
-**Approach 3: Manual SSE formatting**
-```nushell
-| str join # Still buffers
-```
-❌ Same buffering issue
+**Key insight:** `where` buffers the entire stream before filtering, while `filter` processes items one-by-one as they arrive.
 
 ### Root Cause
 
-Nushell's `| lines` is designed for finite streams. OpenCode's SSE is infinite. There's a fundamental impedance mismatch.
+**CRITICAL DISCOVERY:** The buffering issue is caused by `where`, not `lines` or streaming itself.
 
-## Options Forward
+- ✅ `lines` streams in real-time
+- ✅ `each` processes items one-by-one
+- ❌ `where` accumulates items before filtering (causes buffering)
+- ✅ `filter` (deprecated) streams items one-by-one
 
-### Option A: Hybrid Approach (Recommended)
+**Solution:** Use the deprecated `filter` command instead of `where` for SSE streaming.
 
-**Keep Datastar for UI, add minimal JavaScript for SSE**
+### Understanding `filter` vs `where` in Nushell
 
-```html
-<script>
-// Only handles SSE connection
-const eventSource = new EventSource('http://localhost:3030/event');
-eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    if (event.type === 'message.part.updated' && event.properties.part.sessionId === sessionId) {
-        // Update Datastar signal manually
-        document.querySelector('body').dataset.signals = JSON.stringify({
-            ...currentSignals,
-            response: event.properties.part.text
-        });
+**The Problem:**
+
+When working with infinite SSE streams, `where` causes significant buffering:
+
+```nu
+# ❌ BUFFERS - Won't stream in real-time
+http get http://localhost:3030/event
+| lines
+| where ($it | str starts-with "data:")  # Accumulates before filtering
+```
+
+**The Solution:**
+
+Use the deprecated `filter` command which processes one item at a time:
+
+```nu
+# ✅ STREAMS - Processes immediately
+http get http://localhost:3030/event
+| lines
+| filter {|line| $line | str starts-with "data:"}  # Streams one-by-one
+```
+
+**Why This Matters:**
+
+- `where` was designed for finite collections (like SQL WHERE clauses)
+- `filter` was designed for streaming/lazy evaluation
+- Nushell deprecated `filter` in favor of `where` for consistency with SQL
+- But for SSE/streaming use cases, `filter` is still the correct tool
+
+**Pattern for SSE Streaming:**
+
+```nu
+http get http://localhost:3030/event
+| lines                                   # ✅ Streams
+| filter {|line| /* condition */}         # ✅ Streams (use despite deprecation)
+| each {|line| /* transform */}           # ✅ Streams
+| filter {|item| /* condition */}         # ✅ Streams
+| each {|item| /* final transform */}     # ✅ Streams
+```
+
+## Debugging Session: Pure Nushell Streaming
+
+**IMPORTANT DISCOVERY:** Pure nushell `http get` DOES stream in real-time!
+
+### Streaming OpenCode Events (Terminal)
+
+See debug-listen.nu file.
+
+```nu
+# Stream and parse events - USE filter NOT where!
+http get -m 15sec http://localhost:3030/event
+| lines
+| filter {|line| $line | str starts-with "data:"}
+| each {|line| $line | str substring 6.. | from json}
+| filter {|event| $event.type? == "message.part.updated" and $event.properties?.part?.type? == "text"}
+| each {|event| $event.properties?.part?.text?}
+```
+
+```nu
+# Simplified: just get the text deltas
+http get -m 15sec http://localhost:3030/event
+| lines
+| filter {|line| $line | str starts-with "data:"}
+| each {|line| $line | str substring 6.. | from json}
+| filter {|event| $event.type? == "message.part.updated" and $event.data?.properties?.part?.type? == "text"}
+| each {|event| $event.data?.properties?.delta?}
+```
+
+### Sending Messages to OpenCode
+
+See debug-write.nu file.
+
+```nu
+# One-liner: create session and send message
+http post http://localhost:3030/session ""
+| get id
+| $"http://localhost:3030/session/($in)/message"
+| http post $in ({parts: [{type: "text", text: "create a whale"}]} | to json) -H [Content-Type application/json]
+```
+
+### Event Structure to Extract
+
+**What we want:** `message.part.updated` events with `type: "text"`
+
+Also see reference to 'delta' above.
+
+```json
+{
+  "type": "message.part.updated",
+  "properties": {
+    "part": {
+      "id": "prt_...",
+      "sessionID": "ses_...",
+      "messageID": "msg_...",
+      "type": "text",           // ← Filter for this
+      "text": "Hello world!"    // ← Extract this
     }
-};
-</script>
+  }
+}
 ```
 
-**Pros:**
-- Works with OpenCode's existing SSE stream
-- Still uses Datastar for all UI reactivity
-- Minimal JavaScript (~20 lines)
-- Real-time streaming
+**Other event types to ignore:**
+- `server.connected` - Initial connection
+- `message.updated` - Metadata only (no text)
+- `session.updated` - Session info
+- `session.idle` - Session idle notification
+- `message.part.updated` with `type: "reasoning"` - Internal reasoning
+- `message.part.updated` with `type: "step-start"` - Tool invocation
 
-**Cons:**
-- Not "pure" Datastar server-driven
-- Requires understanding Datastar's internal signal storage
+### The http-nu Problem
 
-### Option B: Polling
-
-Have client poll for updates instead of streaming.
-
-```html
-<button data-on:click="@post('/send-prompt'); setInterval(() => @get('/check-response'), 1000)">
+**Works in terminal:**
+```nu
+http get http://localhost:3030/event | lines  # ✅ Streams!
 ```
 
-**Pros:**
-- No streaming complexity
-- Pure Datastar
+**Fails in http-nu:**
+```nu
+{|req|
+    http get http://localhost:3030/event | lines  # ❌ TLS crypto provider error
+}
+```
 
-**Cons:**
-- Not real-time
-- More server load
-- Polling feels dated
+**Workaround - Use curl with filter:**
+```nu
+curl -N -s http://localhost:3030/event
+| lines
+| filter {|line| $line | str starts-with "data:"}  # ✅ Streams in real-time!
+```
 
-### Option C: Backend Transformation Service
+**The issue:** nushell's `http` command requires TLS crypto provider in http-nu closure context. Using `curl` avoids the TLS error. Using `filter` (instead of `where`) enables real-time streaming without buffering.
 
-Create a dedicated service that:
-1. Subscribes to OpenCode `/event`
-2. Filters by session
-3. Transforms to Datastar SSE format
-4. Provides session-specific endpoints
+## Comparison: xs TodoMVC Tutorial
 
-**Pros:**
-- Pure Datastar from client perspective
-- Proper separation of concerns
+### Reference Implementation
 
-**Cons:**
-- More infrastructure complexity
-- Another service to maintain
+The [xs + Datastar TodoMVC tutorial](https://cablehead.github.io/xs/tutorials/datastar-todomvc/) demonstrates the "native" Datastar way with **xs** (event sourcing).
 
-### Option D: Keep Simple
+**Key Architecture:**
 
-Accept that streaming is complex and just return "Message sent!"
+```
+User Action → POST /add
+    ↓
+.append todos (event stored)
+    ↓
+.cat -f (follow mode) → Real-time aggregation
+    ↓
+minijinja-cli (JSON → HTML)
+    ↓
+SSE: datastar-patch-elements
+    ↓
+Browser updates #todos element
+```
 
-**Pros:**
-- Simple, works now
-- Proves the Datastar + http-nu pattern
+**What's Different:**
 
-**Cons:**
-- No real AI response visible
-- Not a complete demo
+1. **Event Sourcing** - xs stores immutable events, aggregates into projections
+2. **Real-time streams work** - `.cat -f` provides true streaming (no buffering)
+3. **HTML patches** - Uses `datastar-patch-elements` to update DOM directly
+4. **Server-side rendering** - minijinja templates generate HTML fragments
+5. **Single source of truth** - Server owns all state, browser just displays
 
-## Recommendation
+**Why It Works:**
 
-**Option A (Hybrid)** is most pragmatic:
+- **xs is designed for streaming** - `.cat -f` emits events immediately
+- **Backend speaks Datastar** - Directly generates Datastar SSE format
+- **No impedance mismatch** - All components designed to work together
 
-1. Datastar handles 95% of the app (UI reactivity, forms, routing)
-2. JavaScript handles the 5% that's browser-specific (EventSource API)
-3. This is actually how Datastar is meant to work with custom event sources
+### Our Challenge
 
-The key insight: **Datastar is not meant to eliminate ALL JavaScript**, it's meant to eliminate manual DOM manipulation and reactive state management. Using EventSource for SSE is a browser API, not DOM manipulation.
+We're integrating with **OpenCode** (AI coding agent) which:
 
-## Files
+1. **Has its own SSE format** - `message.part.updated` not `datastar-patch-signals`
+2. **Broadcasts all sessions** - Needs client-side filtering
+3. **Nushell buffering** - `| lines` blocks on infinite streams
 
-- `index.html` - Datastar UI with reactive signals
-- `server.nu` - http-nu routing and OpenCode integration
-- `run.sh` - Start the demo server
+**Key Insight:** xs was purpose-built for this use case. OpenCode was not.
+
+### The xs Advantage
+
+If building from scratch with Datastar, **xs + http-nu + minijinja** is the ideal stack:
+
+```nushell
+# Real-time event processing in Nushell
+.cat todos -f
+| lines
+| from json
+| # Aggregate state
+| to json
+| minijinja-cli template.html
+| # Wrap in SSE
+```
+
+This works because:
+- **xs streams properly** - No buffering
+- **Nushell processes events** - One at a time as they arrive
+- **minijinja renders** - Pure server-side HTML
+- **Datastar receives** - Native `datastar-patch-elements` events
+
+### Lessons Learned
+
+1. **Server-driven is powerful** - When backend speaks Datastar natively
+2. **Event sourcing fits naturally** - Append events, stream projections
+3. **Nushell works great** - When streams have proper boundaries
+4. **Integration has costs** - Bridging non-Datastar backends requires compromise
 
 ## Usage
 
