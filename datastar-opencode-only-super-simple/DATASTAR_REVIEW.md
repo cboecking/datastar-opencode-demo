@@ -25,9 +25,18 @@ Line-by-line review of index.html for Datastar best practices conformance.
 - Safer (@ prefix indicates safe action)
 
 **BUT - Special Case for This Example:**
-Our OpenCode API returns **JSON**, not **Datastar SSE events**. So raw `fetch()` might be acceptable since we're demonstrating the mismatch. However, purists will flag this.
+OpenCode uses a **dual-channel pattern**:
+1. **POST response:** Immediate JSON (message ID, initial result)
+2. **SSE stream:** Real-time events as AI processes
 
-**Recommendation:** Add comment explaining why we're not using `@post()`
+This is fundamentally different from Datastar's single-channel SSE approach where `@post()` expects the POST response itself to be an SSE stream with `datastar-patch-elements` events.
+
+**Why we use raw `fetch()`:**
+- Need to handle JSON response to get message ID
+- SSE events come on separate `/event` endpoint
+- Can't use `@post()` because response is JSON, not SSE
+
+**Recommendation:** Add comment explaining dual-channel architecture
 
 ---
 
@@ -78,7 +87,13 @@ event: datastar-patch-elements
 data: elements <div>...</div>
 ```
 
-**BUT:** Again, our OpenCode API is different, so this might be justified for the example.
+**BUT:** OpenCode's architecture separates concerns:
+- **POST /session/:id/message** → Returns JSON response
+- **GET /event** → Separate SSE stream for real-time updates
+
+This dual-channel approach is different from Datastar's expectation that POST responses are SSE streams. Both channels are needed:
+1. POST to send message and get ID
+2. SSE to watch AI processing in real-time
 
 ---
 

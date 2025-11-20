@@ -32,18 +32,63 @@ python3 -m http.server 8000
 
 ### Step 1: Create Session
 - Click "Create Session"
-- Datastar executes: `POST /session`
+- Executes: `POST /session`
+- **Response:** JSON with `{id: "ses_...", ...}`
 - Stores `sessionId` in signal
 
 ### Step 2: Send Prompt
 - Click "Send Prompt"
-- Datastar executes: `POST /session/:id/message`
-- Sends: "Hello from Datastar! What is 2+2?"
+- Executes: `POST /session/:id/message` with `{parts: [{type: 'text', text: '...'}]}`
+- **Dual Response:**
+  1. **Immediate JSON response:** `{info: {...}, parts: [...]}`
+  2. **SSE stream events:** Real-time updates as AI processes
 
 ### Step 3: Listen to SSE
 - Click "Start SSE Listener"
 - Opens: `EventSource('http://127.0.0.1:42992/event')`
-- Displays raw events in UI
+- **Receives events:**
+  - `message.part.updated` - Reasoning and text chunks
+  - `message.updated` - Message metadata updates
+  - `session.updated` - Session state changes
+  - `session.idle` - AI finished processing
+
+## OpenCode Dual-Channel Pattern
+
+**Critical Understanding:** OpenCode uses **two communication channels simultaneously:**
+
+### Channel 1: Request/Response (HTTP)
+```javascript
+// POST returns immediate JSON response
+POST /session/:id/message
+→ Response: {
+    info: {id: "msg_...", ...},
+    parts: [{type: "text", text: "4"}]
+  }
+```
+
+### Channel 2: Event Stream (SSE)
+```javascript
+// Long-lived SSE connection sends real-time updates
+GET /event
+→ Stream of events:
+   event: message.part.updated
+   data: {type: "reasoning", text: "..."}
+
+   event: message.part.updated
+   data: {type: "text", text: "4"}
+
+   event: session.idle
+```
+
+### Why Both?
+
+1. **POST response** - Get message ID immediately, know request was accepted
+2. **SSE stream** - Watch AI think in real-time (reasoning, partial responses, etc.)
+3. **Final state** - POST response contains final result AFTER stream completes
+
+**This is different from pure Datastar**, which expects:
+- Single SSE response with `datastar-patch-elements` events
+- No separate JSON response channel
 
 ## Key Observations
 
