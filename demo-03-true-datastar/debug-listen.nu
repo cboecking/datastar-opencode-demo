@@ -1,24 +1,91 @@
 #!/usr/bin/env nu
+# Testing where vs filter patterns - Issue #16990
+
 let timeout = 60sec
-let output = "/tmp/output2.txt"
-"starting..." | save --force $output
+const API = "http://localhost:42992"
 
-#http get -m $timeout http://localhost:3030/event | lines | where ($it | str starts-with "data:") | each {$in | from json } | where {|x| $x}
-#http get -m $timeout http://localhost:3030/event
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json}
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | where {$in.data.type == "message.part.updated"}
-#next line breaks the stream with the mutliple 'where'
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | where {$in.data.type == "message.part.updated"} | where {$in.data.properties.part.type == "text"}
-#next line breaks the stream with the 'and'
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | where {$in.data.type == "message.part.updated" and $in.data.properties.part.type == "text"}
-#next line breaks the stream - same reason
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | where {$in.data.type == "message.part.updated" and $in.data.properties.part.type == "text"} | each {$in.data?.properties?.delta?}
+print "Choose test to run:"
+print "1. BASELINE: filter with explicit param (known to work)"
+print "2. ORIGINAL: each {$in} + where {$in} - single condition"
+print "3. ORIGINAL: each {$in} + where {$in} + where {$in} - multiple where"
+print "4. ORIGINAL: each {$in} + where {$in and} - compound condition"
+print "5. ORIGINAL: each {$in} + where {$in} + each {$in} - where + each combo"
+print "6. where with \$it row-condition"
+print "7. NO \$in: all explicit params - where version"
+print ""
 
-#next line breaks the stream - seems like the where + each also causes the delay
-#http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | where {$in.data.type == "message.part.updated"} | each {$in.data?.properties?.delta?}
+let choice = (input "Enter choice (1-7): ")
 
-#this works
-http get -m $timeout http://localhost:3030/event | lines | each {$in | from json} | filter {|x| $x.data.type == "message.part.updated"} | each {$in.data?.properties?.delta?}
+match $choice {
+    "1" => {
+        print "\n=== TEST 1: filter with explicit param (BASELINE - should stream) ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {$in | from json}
+        | filter {|x| $x.data.type == "message.part.updated"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    "2" => {
+        print "\n=== TEST 2: each {$in} + where {$in} - single condition ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {$in | from json}
+        | where {$in.data.type == "message.part.updated"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    "3" => {
+        print "\n=== TEST 3: each {$in} + multiple where {$in} ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {$in | from json}
+        | where {$in.data.type == "message.part.updated"}
+        | where {$in.data.properties.part.type == "text"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    "4" => {
+        print "\n=== TEST 4: each {$in} + where {$in and} compound ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {$in | from json}
+        | where {$in.data.type == "message.part.updated" and $in.data.properties.part.type == "text"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    "5" => {
+        print "\n=== TEST 5: each {$in} + where {$in} + each {$in} ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {$in | from json}
+        | where {$in.data.type == "message.part.updated"}
+        | each {$in.data?.properties?.delta?}
+    }
+
+    "6" => {
+        print "\n=== TEST 6: where with \$it row-condition ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | where ($it | str starts-with "data:")
+        | each {$in | from json}
+        | where {|x| $x.data.type == "message.part.updated"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    "7" => {
+        print "\n=== TEST 7: NO \$in at all - all explicit params with where ==="
+        http get -m $timeout $"($API)/event"
+        | lines
+        | each {|line| $line | from json}
+        | where {|x| $x.data.type == "message.part.updated"}
+        | each {|x| print $"✓ ($x.data?.properties?.delta?)"; $x}
+    }
+
+    _ => {
+        print "Invalid choice"
+    }
+}
 
 
 #╭────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮

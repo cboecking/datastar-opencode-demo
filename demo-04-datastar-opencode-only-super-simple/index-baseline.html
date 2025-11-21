@@ -13,12 +13,11 @@
   </style>
 </head>
 <body>
-  <h1>Experiment 2: data-init Auto-Connect Pattern</h1>
-  <p>Testing reactive SSE connection using data-init when session exists</p>
-  <p><strong>Hypothesis:</strong> data-init provides a declarative way to auto-connect SSE when sessionId changes.</p>
+  <h1>Datastar + OpenCode SSE Test</h1>
+  <p>Testing pure SSE compatibility between Datastar and OpenCode</p>
 
   <!-- Step 1: Create Session -->
-  <div data-signals="{sessionId: '', status: 'ready', events: [], postResponse: null, promptText: 'Hello from Datastar! What is 2+2?', sseActive: false}">
+  <div data-signals="{sessionId: '', status: 'ready', events: [], postResponse: null, promptText: 'Hello from Datastar! What is 2+2?'}">
 
     <h2>Step 1: Create Session</h2>
     <button
@@ -53,16 +52,14 @@
       </div>
     </div>
 
-    <!-- Auto-connect SSE when session exists (data-init pattern) -->
-    <div data-show="$sessionId !== '' && !$sseActive"
-         data-init="const es = new EventSource('http://127.0.0.1:42992/event'); es.onopen = () => {$sseActive = true; $status += ' | SSE connected'}; es.onmessage = e => {$events.push(e.data)}; es.onerror = () => {$sseActive = false; $status += ' | SSE error'}">
-      <p><em>Auto-connecting to SSE...</em></p>
-    </div>
-
-    <!-- SSE Status Display -->
-    <div data-show="$sseActive">
-      <h2>SSE Connection Active</h2>
-      <p>Listening for OpenCode events in real-time...</p>
+    <!-- Step 3: Listen to SSE Events -->
+    <div data-show="$sessionId !== ''">
+      <h2>Step 3: SSE Events from OpenCode</h2>
+      <p>Open browser console to see SSE events, or click below:</p>
+      <button
+        data-on:click="const es = new EventSource('http://127.0.0.1:42992/event'); es.onmessage = e => {$events.push(e.data); $status = 'Received ' + $events.length + ' events'}; es.onerror = e => $status = 'SSE Error'">
+        Start SSE Listener
+      </button>
     </div>
 
     <!-- Event Display -->

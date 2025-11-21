@@ -86,73 +86,87 @@ OpenCode provides SSE at `/event` but:
 
 1. **Broadcasts ALL sessions** - Not filtered by session ID
 2. **Never closes** - Stream runs forever
-3. **Nushell `where` buffering** - Using `where` in pipelines causes buffering (must use `filter` instead)
+3. **Nushell `$in` buffering** - Using `$in` in consecutive closures causes buffering (see [nushell#16990](https://github.com/nushell/nushell/issues/16990))
 
 ### Solution
 
-**Use `filter` instead of `where`:**
+**Avoid using `$in` in consecutive pipeline closures. Use explicit parameters instead:**
 
 ```nushell
+# ✅ STREAMS - Use explicit parameters
 http get $"($OPENCODE_API)/event"
 | lines
-| filter {|line| $line | str starts-with "data:"}  # ✅ Streams in real-time!
-| each {|line| $line | str substring 6.. | from json}
-| filter {|event| $event.type? == "message.part.updated"}
+| each {|line| $line | from json}
+| where {|event| $event.type? == "message.part.updated"}
+| each {|event| print $"✓ ($event.properties?.delta?)"; $event}
 ```
 
-**Key insight:** `where` buffers the entire stream before filtering, while `filter` processes items one-by-one as they arrive.
+```nushell
+# ❌ BUFFERS - Consecutive $in usage
+http get $"($OPENCODE_API)/event"
+| lines
+| each {$in | from json}
+| where {$in.type? == "message.part.updated"}  # Second $in causes buffering
+```
+
+**Key insight:** It's not about `where` vs `filter` - it's about using `$in` in multiple consecutive closures.
 
 ### Root Cause
 
-**CRITICAL DISCOVERY:** The buffering issue is caused by `where`, not `lines` or streaming itself.
+**CRITICAL DISCOVERY:** The buffering issue is caused by using `$in` in consecutive pipeline closures, not by `where` itself.
+
+Testing with various patterns ([see debug-listen.nu](./debug-listen.nu)) revealed:
 
 - ✅ `lines` streams in real-time
-- ✅ `each` processes items one-by-one
-- ❌ `where` accumulates items before filtering (causes buffering)
-- ✅ `filter` (deprecated) streams items one-by-one
+- ✅ `each {|x| ...}` with explicit parameters streams
+- ✅ `where {|x| ...}` with explicit parameters streams
+- ❌ `each {$in ...} | where {$in ...}` consecutive `$in` causes buffering
+- ❌ `each {$in ...} | filter {$in ...}` `filter` also buffers with consecutive `$in`
+- ✅ `each {$in ...} | filter {|x| ...}` mixing `$in` and explicit param streams
 
-**Solution:** Use the deprecated `filter` command instead of `where` for SSE streaming.
+**Solution:** Use explicit closure parameters (`{|x| $x.field}`) instead of `$in` for streaming pipelines.
 
-### Understanding `filter` vs `where` in Nushell
+### Understanding `$in` Buffering in Nushell
 
 **The Problem:**
 
-When working with infinite SSE streams, `where` causes significant buffering:
+When working with infinite SSE streams, using `$in` in consecutive closures causes buffering:
 
 ```nu
 # ❌ BUFFERS - Won't stream in real-time
-http get http://localhost:3030/event
+http get http://localhost:42992/event
 | lines
-| where ($it | str starts-with "data:")  # Accumulates before filtering
+| each {$in | from json}
+| where {$in.data.type == "message.part.updated"}  # Consecutive $in usage
 ```
 
 **The Solution:**
 
-Use the deprecated `filter` command which processes one item at a time:
+Use explicit closure parameters throughout:
 
 ```nu
 # ✅ STREAMS - Processes immediately
-http get http://localhost:3030/event
+http get http://localhost:42992/event
 | lines
-| filter {|line| $line | str starts-with "data:"}  # Streams one-by-one
+| each {|line| $line | from json}
+| where {|event| $event.data.type == "message.part.updated"}
 ```
 
 **Why This Matters:**
 
-- `where` was designed for finite collections (like SQL WHERE clauses)
-- `filter` was designed for streaming/lazy evaluation
-- Nushell deprecated `filter` in favor of `where` for consistency with SQL
-- But for SSE/streaming use cases, `filter` is still the correct tool
+- Using `$in` in consecutive closures creates a buffering condition in streaming contexts
+- Explicit parameters (`{|x| $x.field}`) avoid this issue
+- This affects both `where` and `filter` - it's not command-specific
+- The issue is documented in [nushell#16990](https://github.com/nushell/nushell/issues/16990)
 
 **Pattern for SSE Streaming:**
 
 ```nu
-http get http://localhost:3030/event
-| lines                                   # ✅ Streams
-| filter {|line| /* condition */}         # ✅ Streams (use despite deprecation)
-| each {|line| /* transform */}           # ✅ Streams
-| filter {|item| /* condition */}         # ✅ Streams
-| each {|item| /* final transform */}     # ✅ Streams
+http get http://localhost:42992/event
+| lines                                          # ✅ Streams
+| each {|line| $line | from json}                # ✅ Explicit param
+| where {|event| $event.type == "foo"}          # ✅ Explicit param
+| each {|event| $event.data}                    # ✅ Explicit param
 ```
 
 ## Debugging Session: Pure Nushell Streaming
