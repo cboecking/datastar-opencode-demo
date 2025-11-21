@@ -1,8 +1,16 @@
-# Datastar Purity Review
+# Datastar Implementation Review
 
-Line-by-line review of index.html for Datastar best practices conformance.
+Review of the working OpenCode/Datastar integration showing dual-channel communication.
 
-## Issues Found
+## ✅ Working Implementation Summary
+
+This demo successfully integrates OpenCode's dual-channel API with Datastar's reactive signals:
+- **Channel 1:** POST response with complete message data (immediate)
+- **Channel 2:** SSE stream with real-time AI processing events
+
+**Key Learning:** Textarea binding requires **value syntax** `data-bind="signalName"` not colon syntax.
+
+## Implementation Patterns
 
 ### 🔴 CRITICAL: Using raw `fetch()` instead of `@post()` action
 
@@ -40,16 +48,29 @@ This is fundamentally different from Datastar's single-channel SSE approach wher
 
 ---
 
-### 🟡 MEDIUM: console.log() in expressions
+### ✅ FIXED: Textarea Data Binding
 
-**Lines 44, 54:**
-```javascript
-console.log('Prompt text:', $promptText)
+**Critical Discovery:** Textareas require different binding syntax than inputs!
+
+**❌ Wrong (doesn't work):**
+```html
+<textarea data-bind:promptText>Default text</textarea>
 ```
 
-**Issue:** Not idiomatic Datastar. Expressions should be focused on data flow, not debugging.
+**✅ Correct (works):**
+```html
+<textarea data-bind="promptText">Default text</textarea>
+```
 
-**Fix:** Remove or add comment that this is for debugging only
+**Why it matters:**
+- The **colon syntax** (`data-bind:signalName`) works for `<input>` elements
+- The **value syntax** (`data-bind="signalName"`) is required for `<textarea>` elements
+- This is documented in the Datastar docs (line 2516) but easy to miss
+
+**Implementation pattern:**
+1. Initialize signal in `data-signals`: `{promptText: 'default value'}`
+2. Bind textarea using value syntax: `data-bind="promptText"`
+3. Textarea content and signal stay synchronized
 
 ---
 
@@ -129,33 +150,44 @@ style="width: 100%; min-height: 80px; ..."
 
 ## What's Actually Good ✅
 
-1. ✅ **Using `data-signals__ifmissing`** - Correct pattern for defaults
-2. ✅ **Using `data-bind:promptText`** - Proper two-way binding
+1. ✅ **Explicit signal initialization** - Using `data-signals` to create signals with defaults
+2. ✅ **Correct textarea binding** - Using `data-bind="promptText"` (value syntax)
 3. ✅ **Using `data-show`** - Idiomatic conditional rendering
-4. ✅ **Using `data-text`** - Proper text binding
-5. ✅ **Signal naming** - Lowercase, descriptive
+4. ✅ **Using `data-text`** - Proper text binding for displaying POST response
+5. ✅ **Signal naming** - Lowercase, descriptive (`$promptText`, `$postResponse`)
 6. ✅ **No external JavaScript files** - Pure HTML
+7. ✅ **Dual-channel display** - Clearly shows both immediate POST response and SSE events
 
 ---
 
 ## Verdict
 
-**For a pure Datastar application:** ❌ Would not pass review
+**For a pure Datastar application:** ⚠️ Hybrid approach (justified by API constraints)
 
-**For a demo showing OpenCode/Datastar integration:** ⚠️ Acceptable with caveats
+**For OpenCode/Datastar integration demo:** ✅ Working implementation
 
-**Key Issue:** The example mixes Datastar patterns with raw JavaScript because OpenCode doesn't speak Datastar's SSE event format. Purists will flag:
-1. Raw `fetch()` instead of `@post()`
-2. Manual `EventSource` instead of backend-driven SSE
-3. Complex inline JavaScript
+**Assessment:**
+This implementation successfully demonstrates:
+1. ✅ **Reactive signals work correctly** - Textarea binding, signal updates, data flow
+2. ✅ **Dual-channel display** - Both POST response and SSE events visible
+3. ✅ **Proper Datastar patterns** - Signals, data-bind, data-show, data-text used correctly
+4. ⚠️ **Necessary deviations** - Raw `fetch()` and manual `EventSource` required by OpenCode's API
 
-**Resolution Options:**
-1. Add prominent comments explaining why we deviate
-2. Create a wrapper backend that translates OpenCode → Datastar events
-3. Mark this as "integration example" not "pure Datastar"
+**Why hybrid approach is justified:**
+- OpenCode uses dual-channel: JSON POST response + separate SSE endpoint
+- Datastar's `@post()` expects SSE response, not JSON
+- Raw `fetch()` + manual `EventSource` is the correct bridge between these patterns
+
+**Key Learnings:**
+1. Textarea requires `data-bind="signalName"` (value syntax) not `data-bind:signalName` (colon syntax)
+2. Explicit signal initialization via `data-signals` ensures binding works correctly
+3. Datastar's reactivity works perfectly once signals are properly configured
 
 ---
 
-## Recommended Changes for Purity
+## Implementation Success
 
-See `index-pure.html` for a version that uses only Datastar patterns (would require backend changes).
+This demo proves OpenCode and Datastar can work together effectively by:
+- Using Datastar for reactive UI (signals, binding, conditional display)
+- Using raw fetch/EventSource to bridge OpenCode's dual-channel API
+- Displaying both channels clearly for debugging and understanding

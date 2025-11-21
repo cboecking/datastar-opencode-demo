@@ -118,82 +118,57 @@ To make this truly work with Datastar's hypermedia model:
 
 ---
 
-## Important Fix: Reading Textarea Values
+## ✅ Textarea Binding Solution
 
-### The Problem We Encountered
+### The Critical Discovery
 
-Initially, we tried to use Datastar's `data-bind:promptText` signal binding:
+**Textareas require different binding syntax than inputs!**
 
+**❌ This doesn't work:**
 ```html
-<!-- Textarea with binding -->
 <textarea data-bind:promptText>Hello from Datastar! What is 2+2?</textarea>
-
-<!-- Button trying to use signal -->
-<button data-on:click="...body: JSON.stringify({parts: [{type: 'text', text: $promptText}]})">
 ```
 
-**This failed because:**
-1. The `$promptText` signal was empty when the button was clicked
-2. OpenCode received `{text: ""}` (empty text)
-3. Error: "Each message must have at least one content element"
-
-**Why:** Datastar's `data-bind` didn't properly initialize the signal from the textarea's initial content. The binding works for updates (when you type), but the initial value wasn't captured.
-
-### The Solution
-
-**Read the textarea value directly from the DOM:**
-
-```javascript
-// Button reads actual DOM element value
-const promptValue = document.getElementById('prompt-input').value;
-...body: JSON.stringify({parts: [{type: 'text', text: promptValue}]})
-```
-
-**How it works:**
-1. ✅ Textarea has default content between tags
-2. ✅ Button reads current value directly: `element.value`
-3. ✅ No signal dependency - just regular DOM access
-4. ✅ Sends whatever is currently in the textarea
-
-### Is This a Hack or The Right Approach?
-
-**Important Disclaimer:** We don't yet know if this direct DOM access is:
-- ❓ A "hack" because we haven't learned Datastar's proper signal initialization pattern
-- ❓ The correct approach for simple, one-time reads like form submission
-- ❓ Appropriate for this basic example but signals would be better in complex apps
-
-**We're still learning Datastar!** There may be a proper way to initialize signals from textarea content that we haven't discovered. This solution works reliably for our simple test case.
-
-### The Lesson (Tentative)
-
-**Datastar signals** are powerful for reactive UI updates across multiple elements. But for **simple read operations** (like getting a form value on submit), **direct DOM access** might be:
-- **Simpler** - Less abstraction to debug
-- **More reliable** - No initialization timing issues (in our basic example)
-- **Easier to understand** - Standard JavaScript
-
-**When to use each (our current understanding):**
-- **Use signals (`data-bind`):** When you need reactive updates across multiple elements
-- **Use direct DOM access:** When you just need to read a value once (or when signals aren't initializing properly)
-
-As we learn more about Datastar, we may update this approach!
-
-### Update: Found the Datastar Pattern!
-
-After researching the Datastar documentation, we discovered the `__ifmissing` signal modifier:
-
-**The proper Datastar way:**
+**✅ This works:**
 ```html
-<!-- Set default signal value only if missing -->
-<div data-signals__ifmissing="{promptText: 'Hello from Datastar! What is 2+2?'}">
-  <textarea data-bind:promptText></textarea>
+<div data-signals="{promptText: 'Hello from Datastar! What is 2+2?'}">
+  <textarea data-bind="promptText">Hello from Datastar! What is 2+2?</textarea>
 </div>
 ```
 
-**What `__ifmissing` does:**
-- Sets a signal value ONLY if it doesn't already exist
-- Useful for providing defaults without overwriting user input
-- Can be used in both HTML attributes and SSE events
+### Why It Matters
 
-**Reference:** https://data-star.dev/examples/signals_ifmissing
+**Key difference:**
+- **Input elements:** Use colon syntax `data-bind:signalName`
+- **Textarea elements:** Use value syntax `data-bind="signalName"`
 
-This is the proper pattern we should have used! The `__ifmissing` modifier ensures the signal has a default value that `data-bind` can work with. We'll test this pattern in future examples to confirm it works correctly.
+**Reference:** Datastar docs line 2516 shows textarea example with value syntax
+
+### The Working Pattern
+
+**Step 1: Initialize the signal**
+```html
+<div data-signals="{promptText: 'default value'}">
+```
+
+**Step 2: Bind textarea with value syntax**
+```html
+<textarea data-bind="promptText">default value</textarea>
+```
+
+**Step 3: Use the signal**
+```javascript
+data-on:click="fetch(..., body: JSON.stringify({text: $promptText}))"
+```
+
+**Result:** ✅ Signal updates as you type, sends correct value when clicked
+
+### Implementation Notes
+
+This pattern ensures:
+1. ✅ Signal is explicitly initialized with default value
+2. ✅ Textarea binding works with value syntax (not colon syntax)
+3. ✅ Signal and textarea stay synchronized
+4. ✅ Button sends the current typed value
+
+**Lesson learned:** When Datastar patterns don't work as expected, check the official docs for element-specific syntax!

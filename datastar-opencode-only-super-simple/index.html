@@ -39,12 +39,9 @@
       <div>
         <label for="prompt-input"><strong>Your Prompt:</strong></label><br>
         <textarea id="prompt-input" data-bind="promptText" placeholder="Enter your prompt here..." style="width: 100%; min-height: 80px; padding: 8px; margin: 8px 0; font-family: monospace;">Hello from Datastar! What is 2+2?</textarea>
-        <div style="margin-top: 5px; padding: 5px; background: #f0f0f0; font-family: monospace; font-size: 12px;">
-          <strong>Signal value:</strong> "<span data-text="$promptText"></span>"
-        </div>
       </div>
       <button
-        data-on:click="console.log('Prompt text:', $promptText); fetch('http://127.0.0.1:42992/session/' + $sessionId + '/message', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({parts: [{type: 'text', text: $promptText}]})}).then(r => {if (!r.ok) throw new Error('HTTP ' + r.status); return r.json()}).then(d => {console.log('Response:', d); $postResponse = d; $status = 'Prompt sent! Message ID: ' + d.info.id + ', Response: ' + (d.parts.find(p => p.type === 'text')?.text || 'Processing...')}).catch(e => {console.error(e); $status = 'Error: ' + e.message})">
+        data-on:click="fetch('http://127.0.0.1:42992/session/' + $sessionId + '/message', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({parts: [{type: 'text', text: $promptText}]})}).then(r => {if (!r.ok) throw new Error('HTTP ' + r.status); return r.json()}).then(d => {$postResponse = d; $status = 'Prompt sent! Message ID: ' + d.info.id + ', Response: ' + (d.parts.find(p => p.type === 'text')?.text || 'Processing...')}).catch(e => {$status = 'Error: ' + e.message})">
         Send Prompt
       </button>
 
