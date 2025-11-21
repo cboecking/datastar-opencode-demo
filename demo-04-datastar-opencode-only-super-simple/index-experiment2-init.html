@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Datastar + OpenCode SSE Test</title>
+  <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js"></script>
+  <style>
+    body { font-family: monospace; padding: 20px; max-width: 800px; margin: 0 auto; }
+    pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    .status { padding: 10px; margin: 10px 0; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>Experiment 2: data-init Auto-Connect Pattern</h1>
+  <p>Testing reactive SSE connection using data-init when session exists</p>
+  <p><strong>Hypothesis:</strong> data-init provides a declarative way to auto-connect SSE when sessionId changes.</p>
+
+  <!-- Step 1: Create Session -->
+  <div data-signals="{sessionId: '', status: 'ready', events: [], postResponse: null, promptText: 'Hello from Datastar! What is 2+2?', sseActive: false}">
+
+    <h2>Step 1: Create Session</h2>
+    <button
+      data-on:click="fetch('http://127.0.0.1:42992/session', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({title: 'Datastar Test'})}).then(r => r.json()).then(d => {$sessionId = d.id; $status = 'Session created: ' + d.id})">
+      Create Session
+    </button>
+
+    <div id="status" class="status">
+      <strong>Status:</strong> <span data-text="$status"></span>
+    </div>
+
+    <div id="session-info" data-show="$sessionId !== ''">
+      <strong>Session ID:</strong> <span data-text="$sessionId"></span>
+    </div>
+
+    <!-- Step 2: Send Prompt -->
+    <div data-show="$sessionId !== ''">
+      <h2>Step 2: Send Prompt</h2>
+      <div>
+        <label for="prompt-input"><strong>Your Prompt:</strong></label><br>
+        <textarea id="prompt-input" data-bind="promptText" placeholder="Enter your prompt here..." style="width: 100%; min-height: 80px; padding: 8px; margin: 8px 0; font-family: monospace;">Hello from Datastar! What is 2+2?</textarea>
+      </div>
+      <button
+        data-on:click="fetch('http://127.0.0.1:42992/session/' + $sessionId + '/message', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({parts: [{type: 'text', text: $promptText}]})}).then(r => {if (!r.ok) throw new Error('HTTP ' + r.status); return r.json()}).then(d => {$postResponse = d; $status = 'Prompt sent! Message ID: ' + d.info.id + ', Response: ' + (d.parts.find(p => p.type === 'text')?.text || 'Processing...')}).catch(e => {$status = 'Error: ' + e.message})">
+        Send Prompt
+      </button>
+
+      <!-- POST Response Display -->
+      <div data-show="$postResponse !== null">
+        <h3>POST Response (Channel 1 - Immediate):</h3>
+        <pre data-text="JSON.stringify($postResponse, null, 2)"></pre>
+      </div>
+    </div>
+
+    <!-- Auto-connect SSE when session exists (data-init pattern) -->
+    <div data-show="$sessionId !== '' && !$sseActive"
+         data-init="const es = new EventSource('http://127.0.0.1:42992/event'); es.onopen = () => {$sseActive = true; $status += ' | SSE connected'}; es.onmessage = e => {$events.push(e.data)}; es.onerror = () => {$sseActive = false; $status += ' | SSE error'}">
+      <p><em>Auto-connecting to SSE...</em></p>
+    </div>
+
+    <!-- SSE Status Display -->
+    <div data-show="$sseActive">
+      <h2>SSE Connection Active</h2>
+      <p>Listening for OpenCode events in real-time...</p>
+    </div>
+
+    <!-- Event Display -->
+    <div id="events" data-show="$events.length > 0">
+      <h3>Events Received:</h3>
+      <pre data-text="JSON.stringify($events, null, 2)"></pre>
+    </div>
+
+  </div>
+
+  <hr>
+  <h2>About This Test</h2>
+  <ul>
+    <li><strong>OpenCode API:</strong> http://127.0.0.1:42992</li>
+    <li><strong>Datastar:</strong> Pure hypermedia approach (no frameworks)</li>
+    <li><strong>SSE:</strong> OpenCode emits JSON events, Datastar normally expects HTML patches</li>
+    <li><strong>This test:</strong> Shows raw SSE compatibility - both use text/event-stream</li>
+  </ul>
+</body>
+</html>
